@@ -1,6 +1,6 @@
 #Name: Alejandra Regla-Vargas 
 #Course: STAT 571: Modern Data Mining 
-#Assignment: EDA 
+#Assignment: Exploratory Data Analysis
 
 ## Data preparation
 
