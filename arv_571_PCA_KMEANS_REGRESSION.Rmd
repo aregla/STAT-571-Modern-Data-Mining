@@ -1,0 +1,962 @@
+---
+title: "STAT 571/701 Modern Data Mining, HW 2"
+author:
+- Nic Dias
+- Tyler Leigh
+- Alejandra Regla-Vargas
+date: 'Due: 11:59 PM,  Sunday, 02/28'
+output:
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: '4'
+    latex_engine: xelatex
+  html_document:
+    toc: yes
+    toc_depth: '4'
+    df_print: paged
+urlcolor: blue
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.width = 8, warning = F)
+options(scipen = 0, digits = 3)
+
+pacman::p_load(data.table, factoextra, knitr, irlba, ISLR, Rfast, tidyverse, car)
+
+# Set seed
+set.seed(1)
+```
+
+# Case Study 1: Self-Esteem
+
+## Data Prep and Cleaning
+
+```{r message=F}
+self <- read_csv("data/NLSY79.csv")
+skimr::skim(self) %>%
+  select(-c(numeric.p0, numeric.p25, numeric.p50, numeric.p75, numeric.p100, numeric.hist))
+```
+
+``` {r include=F}
+#exploratory data analysis 
+table(self$Education05) #years of education 
+table(self$Income05)
+
+#fix income values -2 n=25
+table(self$Income87)
+self$Income87[self$Income87==-2] <- NA
+self$Income87[self$Income87==-1] <- NA
+
+#fix height values 
+table(self$HeightFeet05)
+self$HeightFeet05[self$HeightFeet05==-4] <- NA
+
+#assign 0s to the average response 13523 
+table(self$Income87)
+summary(self$Income87)
+
+self$Income87[self$Income87==0] <- 13523
+
+table(self$Weight05)
+table(self$Gender)
+
+table(self$Job05) #address uncodeable value n=1 
+self$Job05[self$Job05=='9990: Uncodeable'] <- NA
+
+table(self$HeightFeet05)
+table(self$HeightInch05)
+
+table(self$Imagazine)
+table(self$Inewspaper)
+
+table(self$MotherEd)
+table(self$FatherEd)
+
+table(self$FamilyIncome78)
+
+table(self$Science)
+table(self$Arith)
+table(self$Word)
+table(self$Parag)
+table(self$Number)
+table(self$Coding)
+table(self$Auto)
+table(self$Math)
+table(self$Mechanic)
+table(self$Elec)
+table(self$AFQT)
+
+table(self$Esteem81_1)
+table(self$Esteem81_2)
+
+#omit missing values 
+self <- na.omit(self)
+
+#rename variables for simplicity of interpretation 
+self <- rename(self, worth = Esteem87_1)
+self <-rename(self, goodqual = Esteem87_2)
+self <-rename(self, failure = Esteem87_3)
+self <-rename(self, well = Esteem87_4)
+self <-rename(self, proud = Esteem87_5)
+self <-rename(self, positive = Esteem87_6)
+self <-rename(self, satisfied = Esteem87_7)
+self <-rename(self, respect = Esteem87_8)
+self <-rename(self, useless = Esteem87_9)
+self <-rename(self, nogood = Esteem87_10)
+
+#reverse the scale 
+self$worth <- car::recode(self$worth, "1=4; 2=3; 3=2; 4=1")
+self$goodqual <- car::recode(self$goodqual, "1=4; 2=3; 3=2; 4=1")
+self$well <- car::recode(self$well, "1=4; 2=3; 3=2; 4=1")
+self$positive <- car::recode(self$positive, "1=4; 2=3; 3=2; 4=1")
+self$satisfied <- car::recode(self$satisfied, "1=4; 2=3; 3=2; 4=1")
+
+#double-check to see if the values are reversed 
+table(self$worth)
+table(self$goodqual)
+table(self$well)
+table(self$positive)
+table(self$satisfied)
+
+#create a subset of the esteem data to simplify analysis 
+data.esteem <- self[,37:46]
+
+```
+
+Summary: After cleaning the variables, the remaining sample size was n = 2345. I began by dropping negative values from both the income87 and height05 variable. For income, I reassigned respondents that answered "0" to the average (13523). I concluded by dropping "uncodeable" values in the job05 variable. The dataset contains two categorical variables and 44 numeric variables. 
+
+## EDA
+
+```{r}
+#1987 plots 
+p1 <- data.esteem %>%
+  ggplot(aes(worth, fill= cut(worth,100))) +
+  geom_histogram(binwidth=1, show.legend=FALSE) +
+  theme(plot.title = element_text(size=8)) +
+  labs(title = 'I am a person of worth', x = "", y = "") +
+  scale_y_continuous(limits=c(0,2000))
+
+p2<- data.esteem %>%
+  ggplot(aes(goodqual, fill= cut(goodqual,100))) +
+  geom_histogram(binwidth=1, show.legend=FALSE) +
+  theme(plot.title = element_text(size=8)) +
+  labs(title = 'I have good qualities', x = "", y = "") +
+  scale_y_continuous(limits=c(0,2000))
+
+p3 <- data.esteem %>%
+  ggplot(aes(failure, fill= cut(failure,100))) +
+  geom_histogram(binwidth=1, show.legend=FALSE) +
+  theme(plot.title = element_text(size=8)) +
+  labs(title = 'I feel like a failure', x = "", y = "") +
+  scale_y_continuous(limits=c(0,2000))
+
+p4 <- data.esteem %>%
+  ggplot(aes(well, fill= cut(well,100))) +
+  geom_histogram(binwidth=1, show.legend=FALSE) +
+  theme(plot.title = element_text(size=8)) +
+  labs(title = 'I do things as well as others', x = "", y = "") +
+  scale_y_continuous(limits=c(0,2000))
+
+p5 <- data.esteem %>%
+  ggplot(aes(proud, fill= cut(proud,100))) +
+  geom_histogram(binwidth=1, show.legend=FALSE) +
+  theme(plot.title = element_text(size=8)) +
+  labs(title = 'I do not have much to be proud of', x = "", y = "") +
+  scale_y_continuous(limits=c(0,2000))
+
+p6 <- data.esteem %>%
+  ggplot(aes(positive, fill= cut(positive,100))) +
+  geom_histogram(binwidth=1, show.legend=FALSE) +
+  theme(plot.title = element_text(size=8)) +
+  labs(title = 'I take a positive attitude towards myself', x = "", y = "") +
+  scale_y_continuous(limits=c(0,2000))
+
+p7 <- data.esteem %>%
+  ggplot(aes(satisfied, fill= cut(satisfied,100))) +
+  geom_histogram(binwidth=1, show.legend=FALSE) +
+  theme(plot.title = element_text(size=8)) +
+  labs(title = 'I am satisfied with myself', x = "", y = "") +
+  scale_y_continuous(limits=c(0,2000))
+
+p8 <- data.esteem %>%
+  ggplot(aes(respect, fill= cut(respect,100))) +
+  geom_histogram(binwidth=1, show.legend=FALSE) +
+  theme(plot.title = element_text(size=8)) +
+  labs(title = 'I wish I could have more respect for myself', x = "", y = "") +
+  scale_y_continuous(limits=c(0,2000))
+
+p9 <- data.esteem %>%
+  ggplot(aes(useless, fill= cut(useless,100))) +
+  geom_histogram(binwidth=1, show.legend=FALSE) +
+  theme(plot.title = element_text(size=8)) +
+  labs(title = 'I feel useless', x = "", y = "") +
+  scale_y_continuous(limits=c(0,2000))
+
+p10 <- data.esteem %>%
+  ggplot(aes(nogood, fill= cut(nogood,100))) +
+  geom_histogram(binwidth=1, show.legend=FALSE) +
+  theme(plot.title = element_text(size=8)) +
+  labs(title = 'I think I am no good', x = "", y = "") +
+  scale_y_continuous(limits=c(0,2000))
+
+#compile plots; 5 on each page
+
+pacman::p_load(grid, gridExtra, gtable)
+g1<- grid.arrange(p1, p2, p3,p4,p5, ncol=2, 
+     left = textGrob("Count"),
+    bottom=textGrob("Esteem Score"))
+g2<- grid.arrange(p6, p7,p8,p9,p10, ncol=2,
+    left = textGrob("Count"),
+    bottom=textGrob("Esteem Score"))
+
+#paste compiled plots onto one document 
+multi.page <- ggpubr::ggarrange(g1, g2,
+                        nrow = 1, ncol =1)
+```
+
+Summary: Participants in the sample have mixed self-esteem scores. When asked about their worth, participants reported higher self-esteem scores; however, when asked about if they felt like a failure, participants reported lower self-esteem scores. In terms of distributions, positively worded self-esteem questions have similar distributions-- with most of the responses clustered at 3 and 4. Similarly, negatively worded self-esteem questions follow similar distributions-- with most of the responses clustered at 3 and 4. However, it is important to note that in two of the negatively-worded esteem questions, ~500 respondents reported "2", thus contributing to the spread of the distribution. Overall, the self-esteem questions follow similar distributions. I foresee the formation of two clusters, given the distributions. 
+
+## Intercorrelations between Esteem Measures
+
+```{r}
+res <- cor(data.esteem)
+res
+
+#produce correlation plot 
+pacman::p_load(corrplot)
+corrplot(res)
+```
+
+Summary: As expected, the positively worded self-esteem scores are positively correlated. For example,"I am a person of worth" and "I have a number good qualities" have a positive linear relationship of 0.700. Similarly, "I am satisfied with myself" and "I take a positive attitude towards myself and others" have a positive linear relationship of 0.605. With respect to the negatively-worded esteem questions, I observed similar patterns. "I think I am no good at all" and "I feel useless at times" have a moderate positive relationship of 0.579. Overall, many of the variables are positively correlated. 
+
+## PCA on 10 esteem measurements 
+
+### PC1 and PC2 loadings 
+
+```{r}
+pc.10<- prcomp(data.esteem, scale=FALSE)
+
+loading <- pc.10$rotation
+knitr::kable(loading)
+```
+
+PC 1 scores: [0.232, 0.243, 0.278, 0.258, 0.312, 0.313, 0.301, 0.393, 0.402, 0.377]; 
+
+PC 2 scores: [-0.371, -0.3364, -0.156, -0.320, -0.143, -0.211, -0.164, 0.330, 0.578, .0.260]
+
+Summary: Yes, they are unit vectors. Yes, they are uncorrelated. 
+
+### Interpretation of PC1 and PC2 scores 
+
+Summary: PC1 is proportional to the total sum of the ten esteem scores. PC2 is the difference between the esteem scores (orthogonal). 
+  
+### Formula for calculating PC1 scores 
+
+Response: PC1 Score_respondent_1 = 0.62(0.23) + -0.40(0.24) + 0.42(0.27) + -0.50(0.26) + -1.52(0.31) + 0.40(0.31) + 0.282(0.29) + -0.097(0.39) + -0.062(0.39) + 0.63(0.37) = -0.057
+
+### Are PC1 and PC2 uncorrelated? 
+
+```{r include=F}
+pccor <- round(cov(pc.10$x), 10)
+```
+
+Response: Yes, PC1 and PC2 are uncorrelated. 
+
+### Proportion of Variance 
+
+```{r include=F}
+#table of variance, sd, and cumulative proportion 
+knitr::kable(summary(pc.10)$importance)
+```
+
+``` {r}
+#PVE scree plot 
+PVE <- plot(summary(pc.10)$importance[2, ], 
+     ylab = "Variance %",
+     xlab="Number of PC's",
+     pch = 16,
+     main="Scree Plot of PVE for Self-Esteem Scores | 1987")
+```
+
+Summary: PC1 score accounts for 46% of the total variance in the ten self-esteem scores. PC2 score captures 13% of the total variation in the ten self-esteem scores. Overall, the two PC scores capture 59% of the variance. 
+
+### Cumulative Proportion of Variance 
+
+```{r}
+CPVE <- plot(summary(pc.10)$importance[3, ], pch=16, ylab="Cumulative PVE",
+xlab="Number of PC's",
+main="Scree Plot of Cumulative PVE for Self-Esteem Scores")
+```
+
+Summary: 59% of the total variability is explained by the first two principal components.
+
+### Bi-plot of PC scores 
+
+```{r}
+
+biplot<- biplot(pc.10, # choices=c(1,2),
+       choices = c(1,2),
+       xlim=c(-.08, .08),
+       ylim=c(-.08, .08),
+       main="Biplot of the PC's")
+abline(v=0, h=0, col="red", lwd=2)
+
+#load packages 
+library(ggfortify)
+biplotgg <- autoplot(pc.10, data = self,
+         choices = c(1,2),
+         loadings = TRUE, loadings.colour = 'blue',
+         loadings.label = TRUE, loadings.label.size = 3)
+```
+
+Summary: Negatively worded esteem questions, such as "I wish I could have more respect for myself" and "I think I am no good at all" are correlated. Similarly, positively worded esteem questions, such as "I am a person of worth" and "I have a number of good qualities are highly correlated." PC1 scores seem to be related to positively worded esteem scores, whereas PC2 relates to negatively worded esteem scores. However, it is important to note that PC1 also includes negatively worded esteem scores. In sum, scores 1-7 cluster downwards and PC scores 8-10 cluster upwards. 
+
+## K-means Clustering
+
+### Optimal number of clusters 
+
+```{r}
+self.kmeans <- kmeans(data.esteem, 2, nstart=25)
+
+#total within-cluster sum of square 
+ wss <- function(data.esteem, k) {
+kmeans(data.esteem, k, nstart = 10)$tot.withinss
+ }
+ 
+#plot wss for the following clusters 
+k.values <- 2:15
+
+#produce wss for specified clusters 
+wss_values <- sapply(k.values,
+function(k) kmeans(data.esteem[,-1], centers = k)$tot.withinss)
+
+#plot clusters 
+plot(k.values, wss_values,
+       type="b", pch = 19, frame = FALSE,
+       xlab="Number of clusters K",
+       ylab="Total within-clusters sum of squares")
+
+#optimal number of clusters 
+library(factoextra)
+fviz_nbclust(data.esteem[,-1], kmeans, method = "wss")
+```
+
+Summary: We can conclude that the the optimal number of clusters is three. 
+
+### Characteristics of each cluster 
+
+```{r include=F}
+#produce means of the clusters 
+print(self.kmeans)
+```
+
+Summary: Cluster one captures respondents with lower reported self-esteem scores, whereas cluster two captures respondents with higher self-esteem scores. However, cluster two also captures respondents with lower self-esteem scores. 
+
+### Visualize clusters 
+
+```{r}
+#plot to capture clusters 
+fviz_cluster(self.kmeans, data = data.esteem)
+```
+
+Summary: The plot displays two distinct clusters; however, there is some overlap between the two clusters.
+
+## What factors relate to self-esteem?
+
+### Data Prep and Modelling
+
+```{r}
+
+#logged income variable 
+self$Income_log <- log(self$Income87)
+
+#height variable
+self$height <- paste(self$HeightFeet05, self$HeightInch05)
+
+#remove spaces 
+self$height <-gsub("[[:space:]]", "", self$height)
+
+#convert to numeric 
+self$height <- as.numeric(self$height) 
+
+#create BMI variable 
+self$bmi <- self$Weight05 / (self$height^2)
+
+#set the following variables as factors 
+
+self$Imagazine<- as.factor(self$Imagazine)
+self$Ilibrary<- as.factor(self$Ilibrary)
+
+data.esteem$pc <- (pc.10$x[,1])
+
+#PC SVABS variable 
+data.svab <- self[,16:25]
+pc.svab<- prcomp(data.svab, scale=FALSE)
+
+
+
+#subset data 
+
+data.self <- data.table(pc1 = pc.10$x[,1],
+                       pc.svab = pc.svab$x[,1], 
+                       magazine = self$Imagazine,
+                       library = self$Ilibrary, 
+                       newspaper = self$Inewspaper,
+                       bmi = self$bmi,
+                       income = self$Income_log,
+                       motheredu = self$MotherEd,
+                       fatheredu = self$FatherEd,
+                       familyincome = self$FamilyIncome78,
+                       gender= self$Gender,
+                       edu = self$Education05,
+                       job= self$Job05)
+
+#Model 1: Sociodemographic characteristics 
+m1 <- lm(pc1 ~ gender + edu + income, data=data.self) 
+
+#Model 2: Additional sociodemographic characteristics 
+m2 <- lm(pc1 ~ gender + edu + income + motheredu + fatheredu + familyincome + job + bmi,  data=data.self) 
+
+#Model 3: remaining variables 
+m3 <- lm(pc1 ~ gender + edu + income + motheredu + fatheredu + familyincome + job + bmi + magazine + library + newspaper + pc.svab, data=data.self) 
+
+#Model 4: significant predictors 
+m4 <- lm(pc1 ~ gender + edu + income + motheredu + job + bmi+ newspaper + pc.svab, data=data.self) 
+```
+
+Summary: The final model is number four. In future analysis, I would collapse the job category given the non-significant results across job types. Model four contains variables that predict self-esteem scores. The variables in model four are significant. 
+
+### Diagnostics
+
+```{r}
+library(broom)
+model.diag.metrics <- augment(m4)
+residualplot<- plot(m4)
+```
+
+Summary: I used a step-wise approach to narrow non-significant predictors from the model. As previously stated, I would collapse the job category, given some of  the non-significant categories. Overall, the model does not meet the assumptions for a linear model. The residuals in the first plot do not have a horizontal line. Second, the normal Q-Q plot, demonstrates that the residuals are not normally distributed. Third, the scale-location plot does not follow a horizontal line, thus suggesting heteroskedasticity. 
+
+### Summary of Findings
+
+Summary: The models demonstrate that gender, education, income, mother's education, bmi, newspaper, and intelligence predict self-esteem scores. However, it is important to note that the model fit is rather weak, as the model only captured 13 percent of the total proportion of the variance.
+
+# Case Study 2: Breat cancer sub-type
+
+## Summary and transformation
+
+```{r}
+# Load data
+brca_subtype <- fread("data/brca_subtype.csv")
+
+# Number of patients with each type of BRCA
+brca_subtype$BRCA_Subtype_PAM50 %>% 
+  table() %>% 
+  as.data.frame() %>%
+  kable(caption = 'Frequencies of Breast Cancer Types',
+               col.names = c('BRCA Type', 'Frequency'))
+```
+
+628 patients have Luminal A breast cancer (BRCA), 233 have Luminal B, 91 have HER2-enriched, and 208 have Basal-like BRCA.
+
+```{r, fig.height = 10}
+# Histograms of five random genes
+rand_genes <- names(brca_subtype)[2:length(names(brca_subtype))] %>% sample(5)
+
+## Histograms
+brca_subtype %>% 
+  select(BRCA_Subtype_PAM50, all_of(rand_genes)) %>%
+  pivot_longer(cols = -BRCA_Subtype_PAM50) %>% 
+  ggplot(aes(x = value, y = ..density..)) +
+  geom_histogram(aes(fill = BRCA_Subtype_PAM50), bins = 30) +
+  facet_grid(BRCA_Subtype_PAM50 ~ name, scales = 'free') +
+  labs(title = 'Gene Histograms by Cancer Type', x = 'Value', y = 'Density') +
+  guides(fill = 'none') +
+  theme_bw()
+
+# Drop types
+`BRCA Type` <- brca_subtype$BRCA_Subtype_PAM50
+brca_subtype <- brca_subtype[, -1]
+
+# Identify genes with zero counts or no variability
+zero_cols <- which(colSums(abs(brca_subtype)) == 0)
+noVar_cols <- which(colVars(abs(as.matrix(brca_subtype))) == 0)
+
+# mean(zero_cols == noVar_cols) # Identical
+
+## Drop them
+brca_sub <- brca_subtype[, !zero_cols, with = F]
+
+# Log transform remaining data
+brca_log <- log2(as.matrix(brca_sub + 1e-10))
+```
+
+The above plot depicts the frequency of gene values, for five random genes, by BRCA type. Each row represents a BRCA type, and each column represents a specific gene.
+
+## Apply kmeans to transformed dataset
+
+```{r}
+# K-means cluster with four centers
+# brca_kmeans <- kmeans(x = brca_log, centers = 4, nstart = 30)
+
+# Save RDS
+# saveRDS(brca_kmeans, 'Homeworks/HW2/brca_kmeans.RDS')
+
+# Load RDS
+brca_kmeans <- readRDS("~/Google Drive/UPenn/Coding/R Programs/Class/Spring 2021/Data Mining/210225 HW 2/data/brca_kmeans.RDS")
+
+# Discrepancy table
+table(`BRCA Type`, brca_kmeans$cluster) %>%
+  kable(caption = 'Discrepancy Table for Four K-Means Clusters',
+               col.names = c('Cluster 1', 'Cluster 2', 'Cluster 3',
+                             'Cluster 4'))
+```
+
+## Spectrum clustering: To scale or not to scale?
+
+```{r}
+# Run 'PCA' with SVD
+svd_cenScale <- prcomp_irlba(brca_log, n = 10, scale. = T)
+svd_cen <- prcomp_irlba(brca_log, n = 10)
+
+# Grab PVE
+pve_cenScale <- summary(svd_cenScale)$importance[2, 1:10]
+pve_cen <- summary(svd_cen)$importance[2, 1:10]
+
+# How many PCs should we use?
+plot(pve_cenScale, type = 'b', pch = 19, frame = FALSE, 
+     main = 'Proportion of Variance Explained by Each Principal Component',
+     xlab = 'Principal component', ylab = 'Proportion of variance explained')
+```
+
+Judging by the 'elbow' rule, we should use four principal components. Additional components beyond four explain neglible amounts of variation.
+
+```{r}
+# Comparing PCs of scaled and unscaled data
+scatter_cenScale <- svd_cenScale$x %>% 
+  as.data.frame() %>%
+  ggplot(aes(x = PC1, y = PC2)) +
+  geom_point() +
+  labs(title = 'Data Scaled') +
+  theme_bw()
+
+scatter_cen <- svd_cen$x %>% 
+  as.data.frame() %>%
+  ggplot(aes(x = PC1, y = PC2)) +
+  geom_point() +
+  labs(title = 'Data Unscaled') +
+  theme_bw()
+
+gridExtra::grid.arrange(scatter_cenScale, scatter_cen, ncol = 2)
+```
+
+In preparation for clustering, we should *not* scale our data before 
+calculating principal components. Visually, it is far easier to distinguish groups of observations in the unscaled data. Likewise, it should be easier for the algorithm to assign observations to clusters.
+
+## Spectrum clustering: Center but do not scale data
+
+```{r}
+fviz_nbclust(svd_cen$x[, 1:4], kmeans, method = 'wss')
+```
+
+Again, using the elbow rule, four clusters seems reasonable. Additional clusters do little to reduce the within-cluster sum of squared error. Moreover, we know we only have four types of BRCA to categorize.
+
+## Choose optimal number of clusters and apply kmeans
+```{r}
+# Kmeans
+# cen_kmeans <- kmeans(svd_cen$x[, 1:4], 4)
+
+# Save RDS
+# saveRDS(cen_kmeans, '~/Desktop/Classes/STAT 571/Homeworks/HW2/cen_kmeans.RDS')
+
+# Load RDS
+cen_kmeans <- readRDS("~/Google Drive/UPenn/Coding/R Programs/Class/Spring 2021/Data Mining/210225 HW 2/data/cen_kmeans.RDS")
+
+# Plot to illustrate efficacy
+plot_data <- data.frame(x = svd_cen$x[,1], y = svd_cen$x[,2],
+                        cluster = as.factor(cen_kmeans$cluster),
+                        cancer_type = as.factor(`BRCA Type`))
+
+plot_data %>%
+  ggplot() +
+  geom_point(aes(x = x, y = y, col = cancer_type, shape = cluster)) +
+  scale_color_manual(labels = c('Basal', 'Her2', 'LumA', 'LumB'),
+                     values = scales::hue_pal()(4)) + 
+  geom_point(x = plot_data %>% subset(cluster == 1) %>% pull(x) %>% mean(),
+             y = plot_data %>% subset(cluster == 1) %>% pull(y) %>% mean()) +
+  geom_point(x = plot_data %>% subset(cluster == 2) %>% pull(x) %>% mean(),
+             y = plot_data %>% subset(cluster == 2) %>% pull(y) %>% mean()) +
+  geom_point(x = plot_data %>% subset(cluster == 3) %>% pull(x) %>% mean(),
+             y = plot_data %>% subset(cluster == 3) %>% pull(y) %>% mean()) + 
+  geom_point(x = plot_data %>% subset(cluster == 4) %>% pull(x) %>% mean(),
+             y = plot_data %>% subset(cluster == 4) %>% pull(y) %>% mean()) + 
+  theme_bw() +
+  labs(color = 'Cancer Type', shape = 'Cluster', x = 'PC1', y = 'PC2',
+       title = 'BRCA Type by K-Means Cluster')
+```
+
+Judging from the above plot, the K-means clustering does not appear to have
+performed well in segregating the different BRCA types. For example,
+while 376 LumA cancer patients are categorized in Cluster 2, 161 were categorized
+in Cluster 1 and 91 were categorized in Cluster 3. Similarly, Her2 cancer
+patients were fairly evenly distributed across Clusters 1, 2, and 4. The BRCA
+are not cleanly divided between the clusters.
+
+## Compare original kmeans to PCA kmeans
+```{r}
+table(`BRCA Type`, brca_kmeans$cluster) %>% 
+  kable(caption = 'Disrepancy Table for Clusters on Original Data',
+        col.names = c('Cluster 1', 'Cluster 2', 'Cluster 3', 'Cluster 4'))
+table(plot_data$cancer_type, plot_data$cluster) %>% 
+  kable(caption = 'Disrepancy Table for Clusters on Four Principal Components',
+        col.names = c('Cluster 1', 'Cluster 2', 'Cluster 3', 'Cluster 4'))
+```
+
+PCA does not appear to have helped with K-means clustering. Let's assume that clusters with the highest proportion of observations with particular BRCA type are the 'proper' clusters. When clustering on the original data, 63% of observations were categorized appropriately. Yet, when clustering on the principal components, only 60.4% of observations were properly categorized. That said, it is remarkable that only four columns of data could be used to cluster observations with an accuracy comparable to that of *19,669 columns* of data. PCA is clearly powerful.
+
+## X patient
+```{r, results = 'hide'}
+# Load 'x' patient
+x_patient <- fread("data/brca_x_patient.csv")
+
+# Filter, log, and center data
+x_sub <- x_patient[, !zero_cols, with = F]
+x_log <- log2(as.matrix(x_sub + 1e-10))
+x_cen <- scale(x_log, center = T, scale = F) %>% 
+  attr('scaled:center') %>%
+  as.vector()
+
+# Grab PCA scores
+PC1_loadings <- svd_cen$rotation %>% as.data.frame() %>% pull(PC1)
+PC2_loadings <- svd_cen$rotation %>% as.data.frame() %>% pull(PC2)
+
+# Plot 'x' patient
+plot_data %>%
+  ggplot() +
+  geom_point(aes(x = x, y = y, col = cancer_type, shape = cluster)) +
+  scale_color_manual(labels = c('Basal', 'Her2', 'LumA', 'LumB'),
+                     values = scales::hue_pal()(4)) + 
+  geom_point(x = sum(x_cen * PC1_loadings),
+             y = sum(x_cen * PC2_loadings)) +
+  theme_bw() +
+  labs(color = 'Cancer Type', shape = 'Cluster', x = 'PC1', y = 'PC2')
+
+# Calculating distance from centroid
+## Cluster 1
+x_dist <- plot_data %>% subset(cluster == 1) %>% pull(x) %>% mean() - sum(x_cen * PC1_loadings)
+y_dist <- plot_data %>% subset(cluster == 1) %>% pull(y) %>% mean() - sum(x_cen * PC1_loadings)
+cluster1_dist <- sqrt(x_dist^2 + y_dist^2)
+
+## Cluster 2
+x_dist <- plot_data %>% subset(cluster == 2) %>% pull(x) %>% mean() - sum(x_cen * PC1_loadings)
+y_dist <- plot_data %>% subset(cluster == 2) %>% pull(y) %>% mean() - sum(x_cen * PC1_loadings)
+cluster2_dist <- sqrt(x_dist^2 + y_dist^2)
+
+## Cluster 3
+x_dist <- plot_data %>% subset(cluster == 3) %>% pull(x) %>% mean() - sum(x_cen * PC1_loadings)
+y_dist <- plot_data %>% subset(cluster == 3) %>% pull(y) %>% mean() - sum(x_cen * PC1_loadings)
+cluster3_dist <- sqrt(x_dist^2 + y_dist^2)
+
+## Cluster 4
+x_dist <- plot_data %>% subset(cluster == 4) %>% pull(x) %>% mean() - sum(x_cen * PC1_loadings)
+y_dist <- plot_data %>% subset(cluster == 4) %>% pull(y) %>% mean() - sum(x_cen * PC1_loadings)
+cluster4_dist <- sqrt(x_dist^2 + y_dist^2)
+
+# Finding minimum
+min_dist <- min(cluster1_dist, cluster2_dist, cluster3_dist, cluster4_dist)
+cluster <- which(c(cluster1_dist, cluster2_dist, cluster3_dist, cluster4_dist) == min_dist)
+```
+
+Judging by Euclidean distance from cluster centroids, Patient 'X' would get assigned to Cluster `r cluster` (Distance = `r min_dist`). Most of the patients in Cluster `r cluster` have LumA breast cancer. However, again, the K-means clustering did not perform well.
+
+# Case Study 3: Cars
+
+## EDA
+
+```{r}
+
+pacman::p_load(tidyverse, ISLR, stargazer, ggplot2, skimr)
+dat <- ISLR::Auto
+
+dat$origin <- factor(dat$origin, levels = c(1:3), labels = c("AM", "EU", "JA"))
+
+```
+
+The `Auto` dataset from `ISLR` has nine variables, all of which are numerical except for the `name` and `origin` variables, which are factors. `origin` was initially coded as numerical but recoded as a factor. There are no missing values in any of the variables in the dataset. 245 cars in the dataset are US-American, 79 are Japanese, and 68 are European. Further summary statistics for the numerical variables in the dataset can be found below.
+
+```{r}
+dat %>% 
+  select(-name, -origin) %>%
+  skim() %>%
+  select(-c(numeric.p0, numeric.p25, numeric.p50, numeric.p75, numeric.p100, numeric.hist))
+```
+
+In addition, we present pair-wise scatterplots of all variables in the dataset, except for `name`:
+
+
+```{r}
+dat %>% select(-name) %>% pairs()
+```
+
+Based on these plots, `mpg` seems to have a nonlinear relationship with several other variables in the dataset. This is a problem, as it violates the linearity assumptions of linear models. To combat this, we took the inverse of `mpg` (`1/mpg`). This transformation produces linear relationships between our recoded `mpg` variable, `mpg.r`, and other variables in the dataset. It seems that our recoded `mpg.r` variable may be better suited to linear modelling, although it makes interpretation of results more difficult.
+
+
+```{r}
+dat <- dat %>% 
+  mutate(mpg.r=1/mpg)
+dat %>%
+  select(-name, -mpg) %>% 
+  pairs()
+```
+
+## `year` and `mpg`
+
+### Simple model
+
+```{r}
+m.1 <- lm(mpg~year, data=dat)
+summary(m.1)
+```
+
+Based on this model, `year` is a significant predictor of `mpg`. Each year, `mpg` increases by an average of 1.23 miles per gallon.
+
+### Add in Horsepower
+
+```{r}
+m.2 <- lm(mpg~year+horsepower, data=dat)
+summary(m.2)
+```
+
+When `horsepower` is added to the model, `year` remains a statistically significant predictor. In this model, `mpg` increases by an average of 0.657 miles per gallon each year, when `horsepower` is held constant (meaning we are only comparing cars with the same horsepower).
+
+### Why are the 95%CIs different?
+
+The effect of `year` differs between the models because the models are making fundamentally different comparisons. The first model looks at the effect of `year` on `mpg`. But in the second, we're looking at the effect of `year` on `mpg` *within* cars of the same level of `horsepower`. The coefficients on `year` differ between the two models because the two models are telling us different things. Additionally, if there is covariation between `horsepower` and `year`, then the estimated coefficient and corresponding 95%CI will change by including `horsepower` in the model.
+
+### Interactive model
+
+```{r}
+m.3 <- lm(mpg~year*horsepower, data=dat)
+summary(m.3)
+```
+
+The interaction between `year` and `horsepower` is statstically significant. `mpg` increases by an average of 2.19 per year when `horsepower` is held constant. The interaction effect indicates that with each passing year, an increase in `horsepower` is associated with less and less of an increase in `mpg`
+
+## Categorical predictors
+
+### Cylinders as continuous
+
+```{r}
+m.4 <- lm(mpg~cylinders, data=dat)
+summary(m.4)
+```
+
+When treated as a continuous variable, `cylinders` has a significant  effect on `mpg.` For each additional cylinder a car has, on average, `mpg` decreases by 3.56 miles per gallon.
+
+### Cylinders as factor
+
+```{r}
+m.5 <- lm(mpg~factor(cylinders), data=dat)
+summary(m.5)
+```
+
+When treating `cylinders` as a factor, we see that the relationship between `cylinders` and `mpg` is more complicated than suggested by the previous model. in this model, we see that cars with 4 cylinders get an average of 8.73 miles more per gallon than cars with 3 cylinders. Cars with 5 and 6 cylinders do not appear to differ significantly from cars with 3 cylinders. Cars with 8 cylinders get an average of 5.59 fewer miles per gallon than cars with 3 cylinders, although this effect is only significant to .05.
+
+### Cylinders as Continuous vs Factor
+
+When we treat `cylinders` as continuous, we assume a linear relationship between `cylinders` and `mpg` and are asking the question "on average, how does `mpg` change as the number of cylinders increase?" In contrast, when we treat `cylinders` as a factor, we're relaxing the linearity assumption and asking a slightly different question: "on average, how does `mpg` differ between cars with 3 cylinders and other numbers of cylinders?" This doesn't tell us how `mpg` changes as `cylinders` increases, but rather tells us how many miles per gallon a car with XX cylinders gets *relative to* cars with 3 cylinders.
+
+
+### Testing cylinders as continuous vs factors
+
+```{r}
+anova(m.4, m.5)
+```
+
+Based on the F-test (performed through an ANOVA) above, we can reject the null hypothesis that `mpg` relates to `cylinders` as a continuous variable.
+
+## Results
+
+```{r include=F}
+m.6 <- lm(mpg~horsepower+year+factor(cylinders)+origin+displacement+weight+acceleration, data=dat)
+summary(m.6)
+
+m.7 <- lm(mpg.r~horsepower+year+factor(cylinders)+origin+displacement+weight+acceleration, data=dat)
+summary(m.7)
+```
+
+### Final Model and Diagnoses
+
+We examine two linear models to see how various car features affect mpg. Both models include all variables except `names`. `cylinders` and `origin` are treated as factor variables; all others are treated as numerical. In the first model, the dependent variable is untransformed mpg. The second model uses the inverse of mpg as the dependent variable, to combat the nonlinearity identified in the pairwise scatterplots examined at the start of this case study. Below, we look at the diagnostic plots to see if this transformation of the DV produces a better model. Both models appear to meet linearity assumptions, although the second model seems to exhibit some heteroskedasticity. The Normal Q-Q lines for both models deviate away from the straight line we'd hope to see, suggesting that the data in our model may not be completely normal. Given the apparent heteroskedasticity of model 2, we will focus on interpreting the results from model 1.
+
+### Model 1 Diagnostics
+
+```{r}
+plot(m.6, c(1,2))
+```
+
+### Model 2 Diagnostics
+
+``` {r}
+plot(m.7, c(1,2))
+```
+
+### Interpretation of Results
+
+```{r}
+summary(m.6)
+```
+
+Our linear model shows that, on average, mpg increases as year, and displacement increase. In contrast, mpg tends to decrease when horsepower and weight increase. Cars with 4, 5, and 8 cylinders get better gas mileage than cars with 3 cylinders, on average. Cars from the EU and Japan get better gas mileage than US-American cars. 
+
+### Prediction
+
+```{r}
+car.pred <- tibble(origin='AM', year=83, cylinders=8, displacement=350, weight=4000, horsepower=260, acceleration=0)
+predict(m.6, car.pred, interval = 'predict')
+```
+
+A car matching the provided specifications is expected to get 18.54 (95%CI: 11.90, 25.18) miles per gallon.
+
+# Simple regression through simulations 
+## Generate data
+```{r}
+# Set seed
+set.seed(1)
+
+# Generate x
+x <- seq(0, 1, length = 40)
+
+# Generate y
+y <- 1 + 1.2*x + rnorm(n = 40, sd = 2)
+
+# Scatterplot
+sim_data <- data.frame(x = x, y = y)
+
+sim_data %>%
+  ggplot(aes(x = x, y = y)) +
+  geom_point() +
+  labs(title = 'Simulated, Linearly Related Variables', x = 'X', y = 'Y') +
+  theme_bw()
+```
+
+## Understand the model
+```{r, results = 'hide'}
+# Run linear model
+sim_lm <- lm(y ~ x, data = sim_data) %>% summary()
+
+# Look at RSE (Sigma)
+sim_lm$sigma
+
+# 95% confidence interval for B1
+sim_lm$coefficients[2] - 1.96*sim_lm$coefficients[2, 2]
+sim_lm$coefficients[2] + 1.96*sim_lm$coefficients[2, 2]
+
+# Update scatterplot
+sim_data %>%
+  ggplot(aes(x = x, y = y)) +
+  geom_smooth(formula = y ~ x, method = 'lm') + 
+  geom_text(aes(x = .6, label = 'Estimated OLS Line', y = 2.3), colour = 'blue') +
+  geom_abline(intercept = 1, slope = 1.2, color = 'red', size = 1) + 
+  geom_text(aes(x = .4, label = 'True OLS Line', y = 1), colour = 'red') +
+  geom_point() +
+  labs(title = 'Simulated, Linearly Related Variables', x = 'X', y = 'Y') +
+  theme_bw()
+```
+The true values of B0 and B1 are 1 and 1.2, respectively. However, according to 
+our model, B0 = 1.3 and B1 = 0.91. B0 has been overestimated, B1 has been underestimated, and our p-value for B1 is well over .05 (*p* = .35). These 
+estimates aren't great, likely because we only used 40 datapoints to estimate 
+the OLS model. However, the RSE for the model, 1.79, is reasonably close to two. Moreover, the 95% confidence interval for B1 (-.97, 2.8) contains the true 
+value of B1, 1.2.
+
+## Diagnoses
+```{r}
+# Residual plot
+residual_data <- data.frame(lm(y ~ x, data = sim_data)$fitted, sim_lm$residuals)
+names(residual_data) <- c('fitted_value', 'residual')
+
+residual_data %>%
+  ggplot(aes(x = fitted_value, y = residual)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 0) +
+  labs(title = 'Residual Plot', x = 'Fitted Value', y = 'Residual') +
+  theme_bw()
+
+## QQ plot
+qqnorm(sim_lm$residuals)
+qqline(sim_lm$residuals, lwd = 4, col = 'blue')
+```
+Our residual plot does not reveal any obvious heteroskedasticity or bias. In 
+other words, across values of X, residuals are distributed evenly about 0
+with roughly the same amount of spread. Moreover, most of our points in the QQ 
+plot are in a straight line, excepting the very bottom of our distribution. This
+all suggests that the linear model assumptions have been met. Our residuals are
+normally distributed about the OLS line, and the variance of these residuals 
+does not depend on X.
+
+## Understand sampling distribution and confidence intervals
+```{r, results = 'hide'}
+# Regress 100 samples from the same DGP
+## Initialize some variables
+x <- seq(0, 1, length = 40) 
+se <- c()
+b1 <- c()
+upper_ci <- c()
+lower_ci <- c()
+
+## Loop
+for (i in 1:100){
+  y <- 1 + 1.2 * x + rnorm(40, sd = 2)
+  
+  out <- summary(lm(y ~ x))$coefficients
+  
+  se <- out[2, 2]
+  b1[i] <- out[2, 1]
+  upper_ci[i] <- b1[i] + qt(0.975, 38) * se
+  lower_ci[i] <- b1[i] - qt(0.975, 38) * se
+}
+
+# Save results
+results <- as.data.frame(cbind(se, b1, upper_ci, lower_ci))
+
+# Drop superfluous variables
+rm(x, se, b1, upper_ci, lower_ci, y, out) 
+
+# Plot sampling distribution of B1
+results %>% 
+  ggplot(aes(x = b1)) +
+  geom_histogram(bins = 30) +
+  labs(title = 'Histogram of Simulated B1s', x = 'B1', y = 'Count') + 
+  theme_bw()
+
+# Mean
+mean(results$b1)
+
+# How many 95% CIs include the true B1?
+mean(results$lower_ci < 1.2 & results$upper_ci > 1.2)
+
+# Visualizing the CIs
+results %>%
+  arrange(b1) %>%
+  ggplot(aes(x = b1, y = 1:nrow(results))) +
+  geom_point() + 
+  geom_linerange(aes(xmin = lower_ci, xmax = upper_ci)) +
+  geom_vline(xintercept = 1.2, color = 'red') +
+  geom_text(aes(x = .4, label = 'True B1', y = 100), colour = 'red') +
+  labs(title = '95% Confidence Intervals of Simulated B1s', x = 'B1 (with 95% CI)', 
+       y = 'Model') + 
+  guides(color = 'none') +
+  theme_bw()
+```
+The sampling distribution of the OLS estimates of B1 are normally distributed about
+center 1.36, which is reasonably close to 1.2 (the true B1). As such, the
+linear models appear to have worked appropriately (i.e., fits with our theory). 
+Also appropriately, the 95% confidence intervals from the linear models bookended
+the true B1 exactly 95% of the time.
+
+
+
+
+
