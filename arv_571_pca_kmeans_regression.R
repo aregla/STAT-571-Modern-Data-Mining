@@ -1,5 +1,5 @@
 #Name: Alejandra Regla-Vargas 
-#Course: STAT 571 
+#Course: STAT 571: Modern Data Mining 
 #Assignment: PCA, K-means, Regression 
 
 #load packages 
